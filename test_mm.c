@@ -1,44 +1,52 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <mpi.h>
 #include "gen_matrix.h"
 #include "my_malloc.h"
 
-// row major
-// @TODO: implement this better
-void mm(double *result, double *a, double *b, int dim_size) {
-  int x, y, k;
-  for (y = 0; y < dim_size; ++y) {
-    for (x = 0; x < dim_size; ++x) {
-      double r = 0.0;
-      for (k = 0; k < dim_size; ++k) {
-	r += a[y * dim_size + k] *  b[k * dim_size + x];
+#define MIN(a, b)         (((a) < (b)) ? (a) : (b))
+#define MATIJ(i, j, cols) (((i) * (cols)) + (j))
+
+#define MM_BLOCK_SIZE  16
+
+// blocked matrix multiply MxP = MxN * NxP
+// assumes destination matrix C is zeroed-out
+// i -> M, j -> P, k -> N
+void mm(double *A, double *B, double *C, int block, 
+        int M, int N, int P, 
+        int C_stride, int C_offset) {
+  for (int i = 0; i < M; i += block) {
+    for (int j = 0; j < P; j += block) {
+      for (int k = 0; k < N; k += block) {
+        for (int i1 = i; i1 < MIN(i + block, M); i1++) {
+          for (int k1 = k; k1 < MIN(k + block, N); k1++) {
+            for (int j1 = j; j1 < MIN(j + block, P); j1++) {
+              C[MATIJ(i1, j1, C_stride) + C_offset] += A[MATIJ(i1, k1, N)] * B[MATIJ(k1, j1, P)];
+            }
+          }
+        }
       }
-      result[y * dim_size + x] = r;
     }
   }
 }
 
-void print_matrix(double *result, int dim_size) {
-  int x, y;
-  for (y = 0; y < dim_size; ++y) {
-    for (x = 0; x < dim_size; ++x) {
-      printf("%f ", result[y * dim_size + x]);
-    }
-    printf("\n");
-  }
-  printf("\n");
+void print_matrix(double *result, int rows, int cols) {
+  
 }
 
 int main(int argc, char *argv[]) {
-  int rank, size;
+
+  int rank, num_procs;
   MPI_Init(&argc, &argv);
   MPI_Comm_rank(MPI_COMM_WORLD,&rank);
-  MPI_Comm_size(MPI_COMM_WORLD,&size);
+  MPI_Comm_size(MPI_COMM_WORLD,&num_procs);
 
+  MPI_Request *mpi_status;
   double **r;
-  double **result;
-  int i;
+  double *column_buf;
+  double *column_block;
+  double *result;
   int num_arg_matrices;
 
   if (argc != 4) {
@@ -49,30 +57,57 @@ int main(int argc, char *argv[]) {
   int test_set = atoi(argv[2]);
   matrix_dimension_size = atoi(argv[3]);
   num_arg_matrices = init_gen_sub_matrix(test_set);
-  int block_size = matrix_dimension_size / size;
+  int block_size = matrix_dimension_size / num_procs;
   
   // allocate arrays
-  r = (double **)my_malloc(sizeof(double *) * num_arg_matrices);
-  result = (double **)my_malloc(sizeof(double *) * 2);
-  result[0] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * block_size);
-  result[1] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * block_size);
+  mpi_status = (MPI_Request *)my_malloc(sizeof(*mpi_status) * num_procs);
+  r = (double **)my_malloc(sizeof(double *) * (num_arg_matrices + 1));
+  column_block = (double *)my_malloc(sizeof(*column_block) * block_size * block_size);
+  column_buf = (double *)my_malloc(sizeof(*column_buf) * matrix_dimension_size * block_size);
 
   // get sub matrices
-  for (i = 0; i < num_arg_matrices; ++i) {
-    r[i] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * block_size);
-    if (gen_sub_matrix(rank, test_set, i, r[i], 0, matrix_dimension_size - 1, 1, block_size * i, block_size * (i + 1) - 1, 1, 1) == NULL) {
+  r[0] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * block_size);
+  for (int i = 0; i < num_arg_matrices; ++i) {
+    r[i + 1] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * block_size);
+    if (gen_sub_matrix(rank, test_set, i, r[i + 1], 0, matrix_dimension_size - 1, 1, block_size * i, block_size * (i + 1) - 1, 1, 1) == NULL) {
       printf("inconsistency in gen_sub_matrix\n");
       exit(1);
     }
   }  
 
-  // perform matrix multiplies
-  int n = 0;
+  int prev_result_idx = 1;
+  for (int n = 1; n < num_arg_matrices; ++n) {
+    result = r[prev_result_idx ^ 0x1];
+    memset(result, 0, matrix_dimension_size * block_size);
 
-  mm(result[0], r[0], r[1], matrix_dimension_size);
-  for (i = 2; i < num_arg_matrices; ++i) {
-    mm(result[n ^ 0x1], result[n], r[i], matrix_dimension_size);
-    n = n ^ 0x1;
+    for (int k = 0; k < num_procs; k++) {
+      for (int i = 0; i < block_size; i++) {
+        memcpy(
+            &column_block[i * block_size], 
+            &r[n + 1][i * matrix_dimension_size], 
+            block_size * sizeof(double));
+      }
+      int status = MPI_Allgather(
+          column_block, 
+          block_size * block_size,
+          MPI_DOUBLE,
+          column_buf,
+          block_size * block_size,
+          MPI_DOUBLE,
+          MPI_COMM_WORLD);
+      if (status != MPI_SUCCESS) {
+        printf("MPI Failed :( %d\n", status);
+        exit(1);
+      }
+
+      mm(
+          &r[prev_result_idx][rank * block_size * matrix_dimension_size], column_buf, result, MM_BLOCK_SIZE, 
+          block_size, matrix_dimension_size, block_size,
+          matrix_dimension_size, k * block_size
+      );
+    }
+
+    prev_result_idx ^= 0x1;
   }
 
   if (debug_perf == 0) {
