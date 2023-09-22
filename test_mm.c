@@ -1,9 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <mpi.h>
 #include "gen_matrix.h"
 #include "my_malloc.h"
 
 // row major
+// @TODO: implement this better
 void mm(double *result, double *a, double *b, int dim_size) {
   int x, y, k;
   for (y = 0; y < dim_size; ++y) {
@@ -29,6 +31,11 @@ void print_matrix(double *result, int dim_size) {
 }
 
 int main(int argc, char *argv[]) {
+  int rank, size;
+  MPI_Init(&argc, &argv);
+  MPI_Comm_rank(MPI_COMM_WORLD,&rank);
+  MPI_Comm_size(MPI_COMM_WORLD,&size);
+
   double **r;
   double **result;
   int i;
@@ -42,17 +49,18 @@ int main(int argc, char *argv[]) {
   int test_set = atoi(argv[2]);
   matrix_dimension_size = atoi(argv[3]);
   num_arg_matrices = init_gen_sub_matrix(test_set);
+  int block_size = matrix_dimension_size / size;
   
   // allocate arrays
   r = (double **)my_malloc(sizeof(double *) * num_arg_matrices);
   result = (double **)my_malloc(sizeof(double *) * 2);
-  result[0] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * matrix_dimension_size);
-  result[1] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * matrix_dimension_size);
+  result[0] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * block_size);
+  result[1] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * block_size);
 
   // get sub matrices
   for (i = 0; i < num_arg_matrices; ++i) {
-    r[i] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * matrix_dimension_size);
-    if (gen_sub_matrix(0, test_set, i, r[i], 0, matrix_dimension_size - 1, 1, 0, matrix_dimension_size - 1, 1, 1) == NULL) {
+    r[i] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * block_size);
+    if (gen_sub_matrix(rank, test_set, i, r[i], 0, matrix_dimension_size - 1, 1, block_size * i, block_size * (i + 1) - 1, 1, 1) == NULL) {
       printf("inconsistency in gen_sub_matrix\n");
       exit(1);
     }
@@ -83,5 +91,8 @@ int main(int argc, char *argv[]) {
     }
     printf("%f\n", sum);
   }
+
+  MPI_Finalize();
+  return 0;
 }
 
