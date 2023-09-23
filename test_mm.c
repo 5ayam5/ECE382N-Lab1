@@ -39,8 +39,12 @@ int main(int argc, char *argv[]) {
 
   int rank, num_procs;
   MPI_Init(&argc, &argv);
+  double start_time = MPI_Wtime();
   MPI_Comm_rank(MPI_COMM_WORLD,&rank);
   MPI_Comm_size(MPI_COMM_WORLD,&num_procs);
+
+  printf("rank %d\n", rank);
+  printf("num_procs %d\n", num_procs);
 
   MPI_Request *mpi_status;
   double **r;
@@ -69,7 +73,7 @@ int main(int argc, char *argv[]) {
   r[0] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * block_size);
   for (int i = 0; i < num_arg_matrices; ++i) {
     r[i + 1] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * block_size);
-    if (gen_sub_matrix(rank, test_set, i, r[i + 1], 0, matrix_dimension_size - 1, 1, block_size * i, block_size * (i + 1) - 1, 1, 1) == NULL) {
+    if (gen_sub_matrix(rank, test_set, i, r[i + 1], 0, matrix_dimension_size - 1, 1, block_size * rank, block_size * (rank + 1) - 1, 1, 1) == NULL) {
       printf("inconsistency in gen_sub_matrix\n");
       exit(1);
     }
@@ -111,22 +115,25 @@ int main(int argc, char *argv[]) {
   }
 
   if (debug_perf == 0) {
-    // print each of the sub matrices
-    for (i = 0; i < num_arg_matrices; ++i) {
-      printf("argument matrix %d\n", i);
-      print_matrix(r[i], matrix_dimension_size);
-    }
-    printf("result matrix\n");
-    print_matrix(result[n], matrix_dimension_size);
-  } else {
-    double sum = 0.0;
+  //   // print each of the sub matrices
+  //   for (i = 0; i < num_arg_matrices; ++i) {
+  //     printf("argument matrix %d\n", i);
+  //     print_matrix(r[i], matrix_dimension_size);
+  //   }
+  //   printf("result matrix\n");
+  //   print_matrix(result[n], matrix_dimension_size);
+  // } else {
+  //   double sum = 0.0;
 
-    for (i = 0; i < matrix_dimension_size * matrix_dimension_size; ++i) {
-      sum += result[n][i];
-    }
-    printf("%f\n", sum);
+  //   for (i = 0; i < matrix_dimension_size * matrix_dimension_size; ++i) {
+  //     sum += result[n][i];
+  //   }
+  //   printf("%f\n", sum);
   }
 
+  if (rank == 0) {
+    printf("time: %f\n", MPI_Wtime() - start_time);
+  }
   MPI_Finalize();
   return 0;
 }
