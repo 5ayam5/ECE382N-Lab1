@@ -102,21 +102,11 @@ int main(int argc, char *argv[]) {
     double *row_matrix = (n == 1) ? input_matrices[0] : result_matrices[prev_result_idx];
     memset(result, 0, sizeof(*result) * matrix_dimension_size * block_size);
 
-#ifdef DEBUG
-    if (rank == 0) {
-      printf("results[%d] <-- %s[%d] * input_matrices[%d]\n",
-            prev_result_idx ^ 0x1,
-            (n == 1) ? "input_matrices" : "results",
-            (n == 1) ? 0 : prev_result_idx,
-            n);
-    }
-#endif
-
     for (int k = 0; k < num_procs; k++) {
       for (int i = 0; i < block_size; i++) {
         memcpy(
             &column_buf[(rank * block_size + i) * block_size],
-            &input_matrices[n][i * matrix_dimension_size], 
+            &input_matrices[n][k * block_size + i * matrix_dimension_size], 
             block_size * sizeof(double));
       }
       int status = MPI_Allgather(
