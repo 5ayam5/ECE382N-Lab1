@@ -8,7 +8,7 @@
 #define MIN(a, b)         (((a) < (b)) ? (a) : (b))
 #define MATIJ(i, j, cols) (((i) * (cols)) + (j))
 
-#define MM_BLOCK_SIZE  16
+#define MM_BLOCK_SIZE  64
 
 // blocked matrix multiply MxP = MxN * NxP
 // assumes destination matrix C is zeroed-out
