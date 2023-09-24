@@ -122,22 +122,11 @@ int main(int argc, char *argv[]) {
         exit(1);
       }
 
-      if (rank == 0) {
-        print_matrix(row_matrix, block_size, matrix_dimension_size);
-        printf("\n");
-        print_matrix(column_buf, matrix_dimension_size, block_size);
-        printf("\n");
-      }
-
       mm(
           row_matrix, column_buf, result, 
           block_size, matrix_dimension_size, block_size,
           matrix_dimension_size, k * block_size
       );
-    }
-    if (rank == 0) {
-      print_matrix(result, block_size, matrix_dimension_size);
-      printf("\n");
     }
   }
 
