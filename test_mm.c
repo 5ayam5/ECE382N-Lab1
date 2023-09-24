@@ -156,36 +156,55 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < num_arg_matrices; i++) {
       if (rank == 0) {
         printf("argument matrix %d\n", i);
-        fflush(stdout);
-      }
-      for (int j = 0; j < num_procs; j++) {
-        if (j == rank) {
+        print_matrix(input_matrices[i], block_size, matrix_dimension_size);
+        for (int j = 1; j < num_procs; j++) {
+          MPI_Recv(input_matrices[i], 
+                   block_size * matrix_dimension_size,
+                   MPI_DOUBLE,
+                   j,
+                   MPI_ANY_TAG,
+                   MPI_COMM_WORLD,
+                   MPI_STATUS_IGNORE);
           print_matrix(input_matrices[i], block_size, matrix_dimension_size);
-          fflush(stdout);
         }
-        MPI_Barrier(MPI_COMM_WORLD);
-      }
-      if (rank == 0) {
         printf("\n");
         fflush(stdout);
       }
+      else {
+        MPI_Send(input_matrices[i], 
+                 block_size * matrix_dimension_size,
+                 MPI_DOUBLE,
+                 0,
+                 0,
+                 MPI_COMM_WORLD);
+      }
     }
-
+    
     if (rank == 0) {
       printf("result matrix\n");
-      fflush(stdout);
-    }
-    for (int j = 0; j < num_procs; j++) {
-      if (j == rank) {
+      print_matrix(result, block_size, matrix_dimension_size);
+      for (int j = 1; j < num_procs; j++) {
+        MPI_Recv(result, 
+                 block_size * matrix_dimension_size,
+                 MPI_DOUBLE,
+                 j,
+                 MPI_ANY_TAG,
+                 MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
         print_matrix(result, block_size, matrix_dimension_size);
-        fflush(stdout);
       }
-      MPI_Barrier(MPI_COMM_WORLD);
-    }
-    if (rank == 0) {
-      printf("\n");
       fflush(stdout);
     }
+    else {
+      MPI_Send(result, 
+               block_size * matrix_dimension_size,
+               MPI_DOUBLE,
+               0,
+               0,
+               MPI_COMM_WORLD);
+    }    
+
+
   } else { // benchmark mode -- sum all
     double block_sum = 0.0;
     for (int i = 0; i < matrix_dimension_size * block_size; i++) {
@@ -200,7 +219,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  if (rank == num_procs - 1) {
+  if (rank == 0) {
     printf("time: %f\n", MPI_Wtime() - start_time);
   }
   MPI_Finalize();
