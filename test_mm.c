@@ -43,13 +43,14 @@ int main(int argc, char *argv[]) {
   MPI_Comm_rank(MPI_COMM_WORLD,&rank);
   MPI_Comm_size(MPI_COMM_WORLD,&num_procs);
 
+#ifdef DEBUG
   printf("rank %d\n", rank);
   printf("num_procs %d\n", num_procs);
+#endif
 
   MPI_Request *mpi_status;
-  double **r;
+  double **input_matrices;
   double *column_buf;
-  double *column_block;
   double *result;
   int num_arg_matrices;
 
@@ -62,39 +63,47 @@ int main(int argc, char *argv[]) {
   matrix_dimension_size = atoi(argv[3]);
   num_arg_matrices = init_gen_sub_matrix(test_set);
   int block_size = matrix_dimension_size / num_procs;
+
+#ifdef DEBUG
+  printf("num_arg_matrices %d\n", num_arg_matrices);
+  printf("matrix_dimension_size %d\n", matrix_dimension_size);
+  printf("block_size %d\n", block_size);
+#endif
   
   // allocate arrays
   mpi_status = (MPI_Request *)my_malloc(sizeof(*mpi_status) * num_procs);
-  r = (double **)my_malloc(sizeof(double *) * (num_arg_matrices + 1));
-  column_block = (double *)my_malloc(sizeof(*column_block) * block_size * block_size);
+  input_matrices = (double **)my_malloc(sizeof(double *) * (num_arg_matrices + 1));
   column_buf = (double *)my_malloc(sizeof(*column_buf) * matrix_dimension_size * block_size);
 
   // get sub matrices
-  r[0] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * block_size);
+  input_matrices[0] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * block_size);
   for (int i = 0; i < num_arg_matrices; ++i) {
-    r[i + 1] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * block_size);
-    if (gen_sub_matrix(rank, test_set, i, r[i + 1], 0, matrix_dimension_size - 1, 1, block_size * rank, block_size * (rank + 1) - 1, 1, 1) == NULL) {
+#ifdef DEBUG
+    printf("gen_sub_matrix %d on rank %d\n", i, rank);
+#endif
+    input_matrices[i + 1] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * block_size);
+    if (gen_sub_matrix(rank, test_set, i, input_matrices[i + 1], 0, matrix_dimension_size - 1, 1, block_size * rank, block_size * (rank + 1) - 1, 1, 1) == NULL) {
       printf("inconsistency in gen_sub_matrix\n");
       exit(1);
     }
-  }  
+  }
 
-  int prev_result_idx = 1;
+  int prev_result_idx = 0;
   for (int n = 1; n < num_arg_matrices; ++n) {
-    result = r[prev_result_idx ^ 0x1];
-    memset(result, 0, matrix_dimension_size * block_size);
+    result = input_matrices[prev_result_idx];
+    memset(result, 0, sizeof(double) * matrix_dimension_size * block_size);
 
     for (int k = 0; k < num_procs; k++) {
       for (int i = 0; i < block_size; i++) {
         memcpy(
-            &column_block[i * block_size], 
-            &r[n + 1][i * matrix_dimension_size], 
+            &column_buf[(rank * block_size + i) * block_size],
+            &input_matrices[n + 1][i * matrix_dimension_size], 
             block_size * sizeof(double));
       }
       int status = MPI_Allgather(
-          column_block, 
-          block_size * block_size,
-          MPI_DOUBLE,
+          MPI_IN_PLACE,
+          0,
+          MPI_DATATYPE_NULL,
           column_buf,
           block_size * block_size,
           MPI_DOUBLE,
@@ -105,7 +114,7 @@ int main(int argc, char *argv[]) {
       }
 
       mm(
-          &r[prev_result_idx][rank * block_size * matrix_dimension_size], column_buf, result, MM_BLOCK_SIZE, 
+          input_matrices[prev_result_idx], column_buf, result, MM_BLOCK_SIZE, 
           block_size, matrix_dimension_size, block_size,
           matrix_dimension_size, k * block_size
       );
