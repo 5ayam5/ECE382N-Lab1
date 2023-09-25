@@ -122,9 +122,9 @@ int main(int argc, char *argv[])
       printf("n %d init result_matrix rank %d\n", n, rank);
 #endif
       result = &result_matrices[prev_result_idx][rank * block_size * matrix_dimension_size];
-      prev_result_idx ^= 0x1;
       memset(result, 0, sizeof(*result) * matrix_dimension_size * block_size);
     }
+    prev_result_idx ^= 0x1;
 
     for (int rank = 0; rank < num_procs; rank++)
     {
