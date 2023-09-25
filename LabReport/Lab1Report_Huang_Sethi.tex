@@ -1,0 +1,100 @@
+\mathchardef\mhyphen="2D
+\documentclass[11pt]{article}
+\usepackage[english]{babel}
+\usepackage{minted}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage[hypcap=false]{caption}
+\usepackage{booktabs}
+\usepackage[left=25mm, top=25mm, bottom=25mm, right=25mm]{geometry}
+\usepackage{soul}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage[most]{tcolorbox}
+\usepackage[colorlinks=true,linkcolor=darkcyan,filecolor=darkcerulean,urlcolor=magenta]{hyperref}
+\usepackage{braket}
+\usepackage{quantikz}
+
+\definecolor{codegray}{rgb}{0.98,0.97,0.93}
+\definecolor{cottoncandy}{rgb}{1.0, 0.84, 0.95}
+\definecolor{darkcerulean}{rgb}{0.03, 0.27, 0.49}
+\definecolor{darkcyan}{rgb}{0.0, 0.50, 0.45}
+
+\title{ECE 382N: Lab 1 Report}
+\author{Tianda Huang\\Sayam Sethi}
+\date{25 September 2023}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+
+\section{MPI Implementation}
+We build upon the provided implementation of the \texttt{test\_mm} code. The entire matrix (of size $m\times m$) is divided into $p\times p$ square blocks each of size $\frac{m}{p}\times \frac{m}{p}$. Processor $i$ obtains the row of this smaller matrix. We then compute the matrix multiplication as follows,
+\begin{equation}
+    \begin{split}
+    \mathbf{A} \times \mathbf{B} &= \begin{pmatrix}
+        A_{11} & A_{12} & \cdots & A_{1p} \\
+        A_{21} & A_{22} & \cdots & A_{2p} \\
+        \vdots & \vdots & \ddots & \vdots \\
+        A_{p1} & A_{p2} & \cdots & A_{pp}
+    \end{pmatrix} \times \begin{pmatrix}
+        B_{11} & B_{12} & \cdots & B_{1p} \\
+        B_{21} & B_{22} & \cdots & B_{2p} \\
+        \vdots & \vdots & \ddots & \vdots \\
+        B_{p1} & B_{p2} & \cdots & B_{pp}
+    \end{pmatrix}\\
+    &= \begin{pmatrix}
+        \begin{pmatrix}
+            A_{11} & A_{12} & \cdots & A_{1p}
+        \end{pmatrix} \times \begin{pmatrix}
+            B_{11} \\ B_{21} \\ \vdots \\ B_{p1}
+        \end{pmatrix} & \cdots & \begin{pmatrix}
+            A_{11} & A_{12} & \cdots & A_{1p}
+        \end{pmatrix} \times \begin{pmatrix}
+            B_{1p} \\ B_{2p} \\ \vdots \\ B_{pp}
+        \end{pmatrix} \\
+        \begin{pmatrix}
+            A_{21} & A_{22} & \cdots & A_{2p}
+        \end{pmatrix} \times \begin{pmatrix}
+            B_{11} \\ B_{21} \\ \vdots \\ B_{p1}
+        \end{pmatrix} & \cdots & \begin{pmatrix}
+            A_{21} & A_{22} & \cdots & A_{2p}
+        \end{pmatrix} \times \begin{pmatrix}
+            B_{1p} \\ B_{2p} \\ \vdots \\ B_{pp}
+        \end{pmatrix} \\
+        \vdots & \ddots & \vdots \\
+        \begin{pmatrix}
+            A_{p1} & A_{p2} & \cdots & A_{pp}
+        \end{pmatrix} \times \begin{pmatrix}
+            B_{11} \\ B_{21} \\ \vdots \\ B_{p1}
+        \end{pmatrix} & \cdots & \begin{pmatrix}
+            A_{p1} & A_{p2} & \cdots & A_{pp}
+        \end{pmatrix} \times \begin{pmatrix}
+            B_{1p} \\ B_{2p} \\ \vdots \\ B_{pp}
+            \end{pmatrix}
+    \end{pmatrix}\\
+    &= \begin{pmatrix}
+        C_{11} & C_{12} & \cdots & C_{1p} \\
+        C_{21} & C_{22} & \cdots & C_{2p} \\
+        \vdots & \vdots & \ddots & \vdots \\
+        C_{p1} & C_{p2} & \cdots & C_{pp}
+    \end{pmatrix}
+    \end{split}
+\end{equation}
+Each processor $i$ computes the resultant matrix for row $i$. This requires each processor to have the entire matrix $\mathbf{B}$ but since the calculation for each block will be done sequentially, the processor needs to only store the $j^{th}$ column at any time instant. Ideally, the processor just needs to store the $k^{th}$ block of the $j^{th}$ column when computing the $k^{th}$ block of the $i^{th}$ row. However, this would lead to larger message passing overheads. Each processor would need to broadcast all of its blocks to all cores all at once since different blocks will be required by different processors at different times. Instead, we use \texttt{MPI\_Allgather} and gather the entire column at once for all processors. This reduces the message passing complexity as well since MPI takes the topology into account and all cores perform message passing almost simultaneously. As a result, this approach additionally reduces the stress on send and receive buffers.
+
+Once we are done with the matrix computation, each processor performs the sum of its own row, and then we perform a \texttt{MPI\_Reduce} to obtain the final sum. In the debug mode, each processor sends its matrix to the \texttt{root} processor for printing. We used this approach since \texttt{MPI\_Barrier} wasn't working across different nodes.
+
+\section{Cilk Implementation}
+% TODO: write this
+
+\section{Work Division}
+The work was split almost equally between both the students. We had a back-and-forth division of labour where one fixed the code and added additional functionality and then the other student would add more functionality and fix any bugs that might have been introduced.
+
+\end{document}

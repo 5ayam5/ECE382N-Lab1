@@ -6,3 +6,6 @@ run_cilk.sh
 debug_mm
 logs
 temp
+Lab1Report_Huang_Sethi.*
+!Lab1Report_Huang_Sethi.tex
+!Lab1Report_Huang_Sethi.pdf
