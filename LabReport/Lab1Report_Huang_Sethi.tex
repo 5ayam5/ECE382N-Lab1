@@ -87,12 +87,18 @@ We build upon the provided implementation of the \texttt{test\_mm} code. The ent
     \end{pmatrix}
     \end{split}
 \end{equation}
-Each processor $i$ computes the resultant matrix for row $i$. This requires each processor to have the entire matrix $\mathbf{B}$ but since the calculation for each block will be done sequentially, the processor needs to only store the $j^{th}$ column at any time instant. Ideally, the processor just needs to store the $k^{th}$ block of the $j^{th}$ column when computing the $k^{th}$ block of the $i^{th}$ row. However, this would lead to larger message passing overheads. Each processor would need to broadcast all of its blocks to all cores all at once since different blocks will be required by different processors at different times. Instead, we use \texttt{MPI\_Allgather} and gather the entire column at once for all processors. This reduces the message passing complexity as well since MPI takes the topology into account and all cores perform message passing almost simultaneously. As a result, this approach additionally reduces the stress on send and receive buffers.
+Each processor $i$ computes the resultant matrix for row $i$. This requires each processor to have the entire matrix $\mathbf{B}$ but since the calculation for each block will be done sequentially, the processor needs to only store the $j^{th}$ column at any time instant. Ideally, the processor just needs to store the $k^{th}$ block of the $j^{th}$ column when computing the $k^{th}$ block of the $i^{th}$ row. However, this would lead to larger message passing overheads. Each processor would need to broadcast all of its blocks to all cores all at once since different blocks will be required by different processors at different times. Instead, we use \texttt{MPI\_Allgather} and gather the entire column at once for all processors. This reduces the message passing complexity as well since MPI takes the topology into account and all cores perform message passing almost simultaneously. As a result, this approach additionally reduces the stress on send and receive buffers.\\
 
 Once we are done with the matrix computation, each processor performs the sum of its own row, and then we perform a \texttt{MPI\_Reduce} to obtain the final sum. In the debug mode, each processor sends its matrix to the \texttt{root} processor for printing. We used this approach since \texttt{MPI\_Barrier} wasn't working across different nodes.
 
 \section{Cilk Implementation}
-% TODO: write this
+For Cilk we follow a similar blocking style. We store all the input matrices and output matrix on the "root" node. Then, obtaining the number of Cilk workers with $p=$\texttt{__cilkrts_get_nworkers}, we split the matrix into $p\times p$ blocks of size $\frac{m}{p}\times\frac{m}{p}$.\\
+
+Each block of the result is computed by a dot product of a block-row and block-column; each dot product computed as a \texttt{cilk_spawn} task.\\
+
+After the matrix computation, we compute the sum of all elements by separating into block-rows. Each block-row is summed by a separate \texttt{cilk_spawn} task and the resulting partial sums are reduced into a total sum by the root task.\\
+
+The motivation for $p\times p$ blocking is to create enough small tasks such that each processor is busy, while reducing the \texttt{cilk_spawn} overhead by keeping each task as large as possible.
 
 \section{Work Division}
 The work was split almost equally between both the students. We had a back-and-forth division of labour where one fixed the code and added additional functionality and then the other student would add more functionality and fix any bugs that might have been introduced.
