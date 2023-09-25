@@ -2,4 +2,7 @@
 .vscode
 test_mm
 run_mpi.sh
+run_cilk.sh
+debug_mm
 logs
+temp
