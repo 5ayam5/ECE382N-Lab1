@@ -21,22 +21,25 @@
 // i -> M, j -> P, k -> N
 void mm(double *A, double *B, double *C,
         int M, int N, int P,
+        int A_stride, int A_offset,
         int B_stride, int B_offset,
         int C_stride, int C_offset)
 {
-  for (int i = 0; i < M; i += MM_BLOCK_SIZE)
-    for (int j = 0; j < P; j += MM_BLOCK_SIZE)
-      for (int k = 0; k < N; k += MM_BLOCK_SIZE)
-        for (int i1 = i; i1 < MIN(i + MM_BLOCK_SIZE, M); i1++)
-          for (int k1 = k; k1 < MIN(k + MM_BLOCK_SIZE, N); k1++)
-            for (int j1 = j; j1 < MIN(j + MM_BLOCK_SIZE, P); j1++)
-            {
-#ifdef DEBUG
-              printf("i1 %d k1 %d j1 %d\n", i1, k1, j1);
-              fflush(stdout);
-#endif
-              C[MATIJ(i1, j1, C_stride) + C_offset] += A[MATIJ(i1, k1, N)] * B[MATIJ(k1, j1, B_stride) + B_offset];
+  for (int i = 0; i < M; i += MM_BLOCK_SIZE) {
+    for (int j = 0; j < P; j += MM_BLOCK_SIZE) {
+      for (int k = 0; k < N; k += MM_BLOCK_SIZE) {
+        for (int i1 = i; i1 < MIN(i + MM_BLOCK_SIZE, M); i1++) {
+          for (int k1 = k; k1 < MIN(k + MM_BLOCK_SIZE, N); k1++) {
+            for (int j1 = j; j1 < MIN(j + MM_BLOCK_SIZE, P); j1++) {
+              C[MATIJ(i1, j1, C_stride) + C_offset] += 
+                  A[MATIJ(i1, k1, A_stride) + A_offset] * 
+                  B[MATIJ(k1, j1, B_stride) + B_offset];
             }
+          }
+        }
+      }
+    }
+  }
 }
 
 void print_matrix(double *result, int rows, int cols)
@@ -62,7 +65,11 @@ int main(int argc, char *argv[])
   time_t start_time;
   time(&start_time);
 
-  int num_procs = atoi(getenv("CILK_NWORKERS"));
+  int num_procs = __cilkrts_get_nworkers();
+#if DEBUG
+  printf("num procs %d\n", num_procs);
+#endif
+  fflush(stdout);
 
   double **input_matrices;
   double *result_matrices[2];
@@ -85,61 +92,40 @@ int main(int argc, char *argv[])
   printf("matrix_dimension_size %d\n", matrix_dimension_size);
   printf("block_size %d\n", block_size);
 #endif
+  fflush(stdout);
 
   // allocate arrays
   input_matrices = (double **)my_malloc(sizeof(double *) * num_arg_matrices);
 
-  for (int i = 0; i < 2; i++)
-  {
+  for (int i = 0; i < 2; i++) {
     result_matrices[i] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * matrix_dimension_size);
   }
 
   // get sub matrices
-  for (int i = 0; i < num_arg_matrices; i++)
-  {
-#ifdef DEBUG
-    printf("gen_sub_matrix %d\n", i);
-#endif
+  for (int i = 0; i < num_arg_matrices; ++i) {
     input_matrices[i] = (double *)my_malloc(sizeof(double) * matrix_dimension_size * matrix_dimension_size);
-    for (int rank = 0; rank < num_procs; rank++)
-    {
-      double *ptr = cilk_spawn gen_sub_matrix(rank, test_set, i, &input_matrices[i][rank * matrix_dimension_size * block_size], 0, matrix_dimension_size - 1, 1, block_size * rank, block_size * (rank + 1) - 1, 1, 1);
-      if (ptr == NULL)
-      {
-        printf("inconsistency in gen_sub_matrix\n");
-        exit(1);
-      }
+    if (gen_sub_matrix(0, test_set, i, input_matrices[i], 0, matrix_dimension_size - 1, 1, 0, matrix_dimension_size - 1, 1, 1) == NULL) {
+      printf("inconsistency in gen_sub_matrix\n");
+      exit(1);
     }
-  }
-  cilk_sync;
+  } 
 
   int prev_result_idx = 0;
-  for (int n = 1; n < num_arg_matrices; n++)
-  {
-    for (int rank = 0; rank < num_procs; rank++)
-    {
-#ifdef DEBUG
-      printf("n %d init result_matrix rank %d\n", n, rank);
-#endif
-      result = &result_matrices[prev_result_idx][rank * block_size * matrix_dimension_size];
-      memset(result, 0, sizeof(*result) * matrix_dimension_size * block_size);
-    }
+  for (int n = 1; n < num_arg_matrices; n++) {
+    result = result_matrices[prev_result_idx];
     prev_result_idx ^= 0x1;
+    double *row_matrix = (n == 1) ? input_matrices[0] : result_matrices[prev_result_idx];
+    memset(result, 0, sizeof(*result) * matrix_dimension_size * matrix_dimension_size);
 
-    for (int rank = 0; rank < num_procs; rank++)
-    {
-      for (int k = 0; k < num_procs; k++)
-      {
-#ifdef DEBUG
-        printf("mm rank %d k %d\n", rank, k);
-        fflush(stdout);
-#endif
-        double *row_matrix = &((n == 1) ? input_matrices[0] : result_matrices[prev_result_idx])[rank * block_size * matrix_dimension_size];
+    for (int i = 0; i < num_procs; i++) {
+      for (int j = 0; j < num_procs; j++) {
         cilk_spawn mm(
-            row_matrix, input_matrices[n], result,
+            row_matrix, input_matrices[n], result, 
             block_size, matrix_dimension_size, block_size,
-            matrix_dimension_size, rank * block_size,
-            matrix_dimension_size, k * block_size);
+            matrix_dimension_size, i * block_size * matrix_dimension_size,
+            matrix_dimension_size, j * block_size,
+            matrix_dimension_size, (i * matrix_dimension_size + j) * block_size
+        );
       }
     }
     cilk_sync;
@@ -169,6 +155,7 @@ int main(int argc, char *argv[])
     double all_sum = 0;
     for (int rank = 0; rank < num_procs; rank++)
       all_sum += block_sums[rank];
+    
     printf("%f\n", all_sum);
   }
 

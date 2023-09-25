@@ -197,10 +197,11 @@ int main(int argc, char *argv[]) {
       printf("%f\n", all_sum);
     }
   }
-
+#if DEBUG
   if (rank == 0) {
     printf("time: %f\n", MPI_Wtime() - start_time);
   }
+#endif
   MPI_Finalize();
   return 0;
 }
